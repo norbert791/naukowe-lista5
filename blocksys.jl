@@ -1,23 +1,38 @@
 #author: Norbert Jaśniewicz
 module blocksys
 
-  export SparseMatrix, printMatrix
+  export SparseMatrix, printMatrix, setCell!, getCell
+
+  @enum MatrixRowType begin
+    NO_B
+    SHORT_B
+    LONG_B
+  end
 
   mutable struct MatrixRow
-    #index of the first element of submatrix A row
-    offsetA::UInt64
-    #submatrix A row (dense, l-lenght)
-    rowA::Vector{Float64}
-    #submatrix B row (dense l or 1 length)
-    rowB::Vector{Float64}
-    #submatrix C row (1 length)
-    rowC::Float64
-    #relative position from end of A row
-    offsetC::UInt64
-    MatrixRow(offsetA::UInt64, offsetC::UInt64, rowALength::UInt64, rowBLength::UInt64) =
-    rowBLength < 2 || rowBLength == rowALength ?
-      new(offsetA, zeros(rowALength), zeros(rowBLength): [0.0], 0.0, offsetC) :
-      throw(DomainError("Row b length is not in {0, 1, rowALength}"))
+    #index of first element in A row
+    offsetA :: UInt64
+    #index of first element in B row, 0 means no B row
+    offsetB :: UInt64
+    #index of C, 0 means no C val
+    offsetC :: UInt64
+    abValues :: Vector{Float64}
+    cVal :: Float64
+    function MatrixRow(offsetA::UInt64, relOffsetC::UInt64, length::UInt64, type::MatrixRowType)
+      bLength::UInt64 = 0
+      if type == NO_B
+        bLength = 0
+      elseif type == SHORT_B
+        bLength = 1
+      else
+        bLength = length
+      end
+      abValues::Vector{Float64} = zeros(length + bLength)
+      offsetB::UInt64 = bLength == 0 ? 0 : offsetA - bLength
+
+      offsetC::UInt64 = relOffsetC == 0 ? 0 : offsetA + length + (relOffsetC - 1)
+      return new(offsetA, offsetB, offsetC, abValues, UInt64(0))
+    end
   end
 
   mutable struct SparseMatrix
@@ -26,48 +41,91 @@ module blocksys
     rows::Vector{MatrixRow}
 
     function SparseMatrix(size::UInt64, subMatrixLength::UInt64)
-      if size % subMatrixLength != 0
-        throw(DomainError((size, subMatrixLength), "size mod subMatrixLength != 0 is not allowed"))
-      elseif size == subMatrixLength
-        throw(DomainError((size, subMatrixLength), "subMatrixLength == size is not allowed"))
+      if (size % subMatrixLength != 0)
+        throw(DomainError((size, subMatrixLength), "size mod subMatrixLength must be equal 0"))
       end
-      subSize::UInt64 = div(size, subMatrixLength)
-      index::UInt64 = 0
+      if (size == subMatrixLength)
+        throw(DomainError((size, subMatrixLength), "size == subMatrixLength"))
+      end
+      
       rows::Vector{MatrixRow} = []
-
-      push!(rows, MatrixRow(1 + index * subMatrixLength, UInt64(1), subMatrixLength, UInt64(0)))
-      for i in 2:subMatrixLength
-        push!(rows, MatrixRow(1 + index * subMatrixLength, i, subMatrixLength, UInt64(1)))
+      
+      #Insert A_0C_0 rows
+      for i in 1:subMatrixLength
+        push!(rows, MatrixRow(UInt64(1), UInt64(i), subMatrixLength, NO_B))
       end
-      index += 1
 
-      for _ in 2:subSize
-        push!(rows, MatrixRow(1 + index * subMatrixLength, UInt64(1), subMatrixLength, subMatrixLength))
+      #Number of remaining subMatrix rows to insert
+      blockNum :: UInt64 = (div(size, subMatrixLength)) - 1
+
+      #Insert all B_iA_iC_i block rows except the last one
+      for index in 1:(blockNum - 1)
+        offsetA::UInt64 = 1 + index * subMatrixLength
+        push!(rows, MatrixRow(offsetA, UInt64(1), subMatrixLength, LONG_B))
+        
         for i in 2:subMatrixLength
-          push!(rows, MatrixRow(1 + index * subMatrixLength, i, subMatrixLength, UInt64(1)))
+          push!(rows, MatrixRow(offsetA, UInt64(i), subMatrixLength, SHORT_B))
         end
-        index += 1
+      end
+
+      #Insert the last block row: B_vA_v
+      push!(rows, MatrixRow(1 + blockNum * subMatrixLength, UInt64(0), subMatrixLength, LONG_B))
+
+      for _ in 2:subMatrixLength
+        push!(rows, MatrixRow(1 + blockNum * subMatrixLength, UInt64(0), subMatrixLength, SHORT_B))
       end
 
       return new(size, subMatrixLength, rows)
     end
+    
   end
 
-  function printMatrix(mtx::SparseMatrix)    
+  function printMatrix(mtx::SparseMatrix)
+    #for row in mtx.rows
+    #  printRow(row)
+    #end
     for row in mtx.rows
-      #prefix::String = "* " ^ (row.offsetA - length(row.rowB))
-      println(row.offsetA)
-      println(length(row.rowB))
-      #println(prefix)
-      #bRow = map(x -> parse(UInt64, x), row.rowB)
-      #bRow = join(bRow, " ")
-      #aRow = map(x -> parse(UInt64, x), row.rowA)
-      #aRow = join(aRow, " ")
-      #interfix = "* " ^ (row.offsetA - 1)
-      #cRow = parse(UInt64, row.rowC)
-      #postfix = "#" ^ (mtx.size - (row.offsetA + row.offsetC))
-      #println(prefix + bRow + aRow + interfix + cRow + postfix)
+      prefix = "* " ^ (row.offsetB == 0 ? 0 : row.offsetB - 1)
+      vals = map(x -> string(x), row.abValues)
+      vals = join(vals, " ")
+      interfix = " " * "* " ^ (row.offsetC == 0 ? 0 : row.offsetC - row.offsetA - mtx.subMatrixLength)
+      interfix = interfix == "" ? " " : interfix
+      interfix *= row.offsetC == 0 ? "" : string(row.cVal) * " "
+      suffix = row.offsetC == 0 ? "" : "* " ^ (mtx.size - row.offsetC)
+      result = prefix * vals * interfix * suffix * "\n"
+      println(result)
     end
   end
 
+  function setCell!(mtx::SparseMatrix, row::UInt64, column::UInt64, value::Float64)
+    if column == 0 || column > mtx.size
+      throw(BoundsError(column, "Index of out bound"))
+    end
+    offsetA::UInt64 = mtx.rows[row].offsetA
+    offsetB::UInt64 = mtx.rows[row].offsetB
+    offsetC::UInt64 = mtx.rows[row].offsetC
+    if column <= offsetA + mtx.subMatrixLength - 1 && column >= offsetB
+      mtx.rows[row].abValues[column - offsetB + 1] = value
+    elseif column == offsetC
+      mtx.rows[row].cVal = value
+    else
+      throw(BoundsError(column, "Attempt to assign value to 0-field"))
+    end
+  end
+
+  function getCell(mtx::SparseMatrix, row::UInt64, column::UInt64)::Float64
+    if column == 0 || column > mtx.size
+      throw(BoundsError(column, "Index of out bound"))
+    end
+    offsetA::UInt64 = mtx.rows[row].offsetA
+    offsetB::UInt64 = mtx.rows[row].offsetB
+    offsetC::UInt64 = mtx.rows[row].offsetC
+    if column <= offsetA + mtx.subMatrixLength - 1 && column >= offsetB
+      return mtx.rows[row].abValues[column - offsetB + 1]
+    elseif column == offsetC
+      return mtx.rows[row].cVal
+    else
+      return 0.0
+    end
+  end
 end
