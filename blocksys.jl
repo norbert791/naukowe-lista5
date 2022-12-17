@@ -148,17 +148,17 @@ module blocksys
     offsetA::UInt64 = mtx.rows[row].offsetA
     offsetB::UInt64 = mtx.rows[row].offsetB
     leftOffset::UInt64 = offsetB == 0 ? offsetA : offsetB
-    (mtx.rows[row].values[column - leftOffset + 1] = value)
+    return @inbounds (mtx.rows[row].values[column - leftOffset + 1] = value)
   end
 
   @inline function getCellNoCheck(mtx::SparseMatrix, row::UInt64, column::UInt64)::Float64
     offsetA::UInt64 = mtx.rows[row].offsetA
     offsetB::UInt64 = mtx.rows[row].offsetB
     leftOffset::UInt64 = offsetB == 0 ? offsetA : offsetB
-    (return mtx.rows[row].values[column - leftOffset + 1])
+    return @inbounds (mtx.rows[row].values[column - leftOffset + 1])
   end
 
-  function gaussElimination!(mtx::SparseMatrix, bVector::Vector{Float64})
+  function gaussEliminationPriv!(mtx::SparseMatrix, bVector::Vector{Float64})
     @boundscheck if mtx.size != length(bVector)
       throw(DomainError("bVector and mtx have different length"))
     end
@@ -173,26 +173,42 @@ module blocksys
         throw(DomainError("diagonal has 0 elem"))
       end
 
-      #for every row within current block
-      for lRowIndex in (rowIndex + 1):(rowIndex + mtx.subMatrixLength)
-        println((lRowIndex, rowIndex))
-        temp = getCellNoCheck(mtx, lRowIndex, rowIndex)
+      blockEnd = min(rowIndex + mtx.subMatrixLength, mtx.size)
+      #for every row within current block + 1 row
+      for lowerRowIndex in (rowIndex + 1):(blockEnd)
+        #println((lowerRowIndex, rowIndex))
+        temp = getCellNoCheck(mtx, lowerRowIndex, rowIndex)
         multiplier = temp / elem
-        setCellNoCheck!(mtx, lRowIndex, rowIndex, 0.0)
+        setCellNoCheck!(mtx, lowerRowIndex, rowIndex, 0.0)
 
-        lastElem = mtx.subMatrixLength + (mtx.rows[rowIndex].offsetC == 0) * 
-          mtx.subMatrixLength - 1
+        lastElem = mtx.rows[rowIndex].offsetC == 0 ?
+          mtx.rows[rowIndex].offsetA : mtx.rows[rowIndex].offsetC
+        lastElem += mtx.subMatrixLength - 1
         
         #for every element in that row
-        for index in (rowIndex + 1):(rowIndex + lastElem)
-          println((lRowIndex, index))
-          currVal = getCellNoCheck(mtx, lRowIndex, index)
-          println((lRowIndex, index))
+        for index in (rowIndex + 1):lastElem
+          #println("currVal, ", (lowerRowIndex, index))
+          currVal = getCellNoCheck(mtx, lowerRowIndex, index)
+          #println("upperVal, ", (rowIndex, index))
           upperVal = getCellNoCheck(mtx, rowIndex, index)
-          setCellNoCheck!(mtx, lRowIndex, index, currVal - multiplier * upperVal)
+          setCellNoCheck!(mtx, lowerRowIndex, index, currVal - multiplier * upperVal)
         end
+        @inbounds bVector[lowerRowIndex] -= bVector[rowIndex] * multiplier
       end
     end
+
+  end
+
+  function gaussElimination!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
+    gaussEliminationPriv!(mtx::SparseMatrix, bVector::Vector{Float64})
+    for i::UInt64 in length(bVector):-1:1
+      for j::UInt64 in (i+1):length(bVector)
+        bVector[i] -= bVector[j] * getCellNoCheck(mtx, i, j)
+      end
+      bVector[i] /= getCellNoCheck(mtx, i, i)
+    end
+
+    return bVector
   end
 
   function readMatrix(filename::String)::SparseMatrix
