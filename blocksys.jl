@@ -202,7 +202,7 @@ module blocksys
   function gaussElimination!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
     gaussEliminationPriv!(mtx::SparseMatrix, bVector::Vector{Float64})
     for i::UInt64 in length(bVector):-1:1
-      for j::UInt64 in (i+1):length(bVector)
+      for j::UInt64 in (i+1):(min(mtx.size, i + 2 * mtx.subMatrixLength - 1))
         bVector[i] -= bVector[j] * getCellNoCheck(mtx, i, j)
       end
       bVector[i] /= getCellNoCheck(mtx, i, i)
