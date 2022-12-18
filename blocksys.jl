@@ -1,7 +1,7 @@
 #author: Norbert Jaśniewicz
 module blocksys
 
-  export SparseMatrix, printMatrix, setCell!, getCell, gaussElimination!, readMatrix, readVector
+  export SparseMatrix, printMatrix, setCell!, getCell, gaussElimination!, gausseliminationMajor!, readMatrix, readVector
 
   mutable struct MatrixRow
     #actual first index
@@ -11,7 +11,7 @@ module blocksys
     #values
     values::Vector{Float64}
 
-    MatrixRow(firstIndex, lastIndex, ALength) = new(firstIndex, lastIndex, zeros(3 * ALength))
+    MatrixRow(firstIndex, lastIndex, ALength) = new(firstIndex, lastIndex, zeros(4 * ALength))
   end
 
   mutable struct SparseMatrix
@@ -103,7 +103,7 @@ module blocksys
     end
 
     leftOffset::UInt64 = mtx.rows[row].firstIndex
-    rightOffset::UInt64 = leftOffset + 3 * mtx.subMatrixLength - 1
+    rightOffset::UInt64 = leftOffset + 4 * mtx.subMatrixLength - 1
     
     if leftOffset <= column && column <= rightOffset
       return mtx.rows[row].values[column - leftOffset + 1]
@@ -165,6 +165,86 @@ module blocksys
     end
 
     return bVector
+  end
+
+  function gaussEliminationMajorPriv!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{UInt64}
+    @boundscheck if mtx.size != length(bVector)
+      throw(DomainError("bVector and mtx have different length"))
+    end
+    rowPermutation::Vector{UInt64} = map(identity, 1:mtx.length)
+    #iterate over diagonal
+    for rowIndex in 1:(mtx.size - 1)
+      
+      #find major element row
+      blockEnd = min(rowIndex + mtx.subMatrixLength, mtx.size)
+      majorRowIndex::UInt64 = rowIndex
+
+      for i in (rowIndex + 1):blockEnd
+        firstElem = getCell(mtx, i, rowPermutation[rowIndex])
+        if abs(firstElem) > abs(mtx.rows[rowPermutation[majorRowIndex]].values[rowIndex])
+          majorRowIndex = i
+        end
+      end
+
+      
+      majorRowView = mtx.rows[rowPermutation[majorRowIndex]]
+      elem = getCellNoCheck(mtx, rowPermutation[majorRowIndex], rowIndex)
+      #update permutation vector
+      rowPermutation[rowIndex], rowPermutation[rowPermutation[majorRowIndex]] = majorRowIndex, rowIndex
+
+      @boundscheck if iszero(elem)
+        throw(DomainError("0 sub-column detected"))
+      end
+
+      #for every row within current block + 1 row
+      for nonMajorRowIndex in rowIndex:blockEnd
+        if nonMajorRowIndex == majorRowIndex
+          continue
+        end
+        #align non major row to major row
+        if (majorRowIndex == blockEnd)
+          mtx.rows[nonMajorRowIndex].firstIndex = majorRowView.firstIndex
+          mtx.rows[nonMajorRowIndex].lastIndex = majorRowView.lastIndex
+        end
+
+        temp = getCellNoCheck(mtx, nonMajorRowIndex, rowIndex)
+        multiplier = temp / elem
+        setCellNoCheck!(mtx, nonMajorRowIndex, rowIndex, 0.0)
+
+        lastElem = majorRowView.lastIndex
+        
+        #for every element in that row
+        for index in (rowIndex + 1):lastElem
+          currVal = getCellNoCheck(mtx, nonMajorRowIndex, index)
+          upperVal = getCellNoCheck(mtx, majorRowIndex, index)
+          setCellNoCheck!(mtx, nonMajorRowIndex, index, currVal - multiplier * upperVal)
+        end
+        @inbounds bVector[nonMajorRowIndex] -= bVector[rowIndex] * multiplier
+      end
+    end
+
+    return rowPermutation
+  end
+
+  function gaussEliminationMajor!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
+    swapVector = gaussEliminationMajorPriv!(mtx, bVector)
+    for i::UInt64 in length(bVector):-1:1
+      actualIndex = swapVector[i]
+      for j::UInt64 in (i+1):(min(mtx.size, i + 2 * mtx.subMatrixLength - 1))
+        bVector[actualIndex] -= bVector[j] * getCellNoCheck(mtx, actualIndex, j)
+      end
+      bVector[actualIndex] /= getCellNoCheck(mtx, actualIndex, i)
+    end
+
+    return bVector
+  end
+
+  function shiftLeft!(row::MatrixRow, shiftLength::UInt64)
+    row.firstIndex += shiftLength
+    
+    for i in 1:(length(row.values) - shiftLength)
+      row.values[i] = row.values[i + shiftLength]
+    end
   end
 
   function readMatrix(filename::String)::SparseMatrix
