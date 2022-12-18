@@ -3,38 +3,15 @@ module blocksys
 
   export SparseMatrix, printMatrix, setCell!, getCell, gaussElimination!, readMatrix, readVector
 
-  @enum MatrixRowType begin
-    NO_B
-    SHORT_B
-    LONG_B
-  end
-
   mutable struct MatrixRow
-    #index of first element in A row
-    offsetA::UInt64
-    #index of first element in B row, 0 means no B row
-    offsetB::UInt64
-    #index of first element in C row, 0 means no C row
-    offsetC::UInt64
+    #actual first index
+    firstIndex::UInt64
+    #actual last index
+    lastIndex::UInt64
+    #values
     values::Vector{Float64}
 
-    function MatrixRow(offsetA::UInt64, length::UInt64, bType::MatrixRowType, cRowPresent::Bool)
-      bLength::UInt64 = 0
-      cLength::UInt64 = cRowPresent * length
-      if bType == NO_B
-        bLength = 0
-      elseif bType == SHORT_B
-        bLength = 1
-      else
-        bLength = length
-      end
-      
-      values::Vector{Float64} = zeros(length + bLength + cLength)
-      offsetB::UInt64 = bLength == 0 ? 0 : offsetA - bLength
-      offsetC::UInt64 = (offsetA + length) * cRowPresent
-
-      return new(offsetA, offsetB, offsetC, values)
-    end
+    MatrixRow(firstIndex, lastIndex, ALength) = new(firstIndex, lastIndex, zeros(3 * ALength))
   end
 
   mutable struct SparseMatrix
@@ -53,28 +30,28 @@ module blocksys
       rows::Vector{MatrixRow} = []
       
       #Insert A_0C_0 rows
-      for _ in 1:subMatrixLength
-        push!(rows, MatrixRow(UInt64(1), subMatrixLength, NO_B, true))
+      for i in 1:subMatrixLength
+        push!(rows, MatrixRow(1, subMatrixLength + i, subMatrixLength))
       end
 
-      #Number of remaining subMatrix rows to insert
-      blockNum :: UInt64 = (div(size, subMatrixLength)) - 1
+      #Number of remaining blocks
+      numBlocks = div(size, subMatrixLength) - 1
 
-      #Insert all B_iA_iC_i block rows except the last one
-      for index in 1:(blockNum - 1)
-        offsetA::UInt64 = 1 + index * subMatrixLength
-        push!(rows, MatrixRow(offsetA, subMatrixLength, LONG_B, true))
+      for i in 1:(numBlocks-1) #first block already inserted, last one ill be inserted manually
+        offsetA = i * subMatrixLength + 1
+        push!(rows, MatrixRow(offsetA - subMatrixLength, offsetA + subMatrixLength, subMatrixLength))
         
-        for _ in 2:subMatrixLength
-          push!(rows, MatrixRow(offsetA, subMatrixLength, SHORT_B, true))
+        for j in 1:(subMatrixLength - 1)
+          push!(rows, MatrixRow(offsetA - 1, offsetA + subMatrixLength + j, subMatrixLength))
         end
       end
 
-      #Insert the last block row: B_vA_v
-      push!(rows, MatrixRow(1 + blockNum * subMatrixLength, subMatrixLength, LONG_B, false))
+      #BA block
+      offsetA = numBlocks * subMatrixLength + 1
+      push!(rows, MatrixRow(offsetA - subMatrixLength, offsetA + subMatrixLength - 1, subMatrixLength))
 
-      for _ in 2:subMatrixLength
-        push!(rows, MatrixRow(1 + blockNum * subMatrixLength, subMatrixLength, SHORT_B, false))
+      for _ in 1:(subMatrixLength - 1)
+        push!(rows, MatrixRow(offsetA - 1, offsetA + subMatrixLength - 1, subMatrixLength))
       end
 
       return new(size, subMatrixLength, rows)
@@ -83,15 +60,14 @@ module blocksys
   end
 
   function printMatrix(mtx::SparseMatrix)
-    #for row in mtx.rows
-    #  println(row)
-    #end
 
     for row in mtx.rows
-      prefix = "* " ^ (row.offsetB == 0 ? 0 : row.offsetB - 1)
-      vals = map(x -> string(x), row.values)
+      prefix = "* " ^ (row.firstIndex == 0 ? 0 : row.firstIndex - 1)
+      length = (row.lastIndex - row.firstIndex)
+      rowView = row.values[1:(length + 1)]
+      vals = map(x -> string(x), rowView)
       vals = join(vals, " ")
-      suffix = row.offsetC == 0 ? "" : "* " ^ (mtx.size + 1 - row.offsetC - mtx.subMatrixLength)
+      suffix = "* " ^ (mtx.size - row.lastIndex)
       result = prefix * vals * " " * suffix * "\n"
       println(result)
     end
@@ -105,14 +81,10 @@ module blocksys
     @boundscheck if column == 0 || column > mtx.size
       throw(BoundsError(row, "Index of out bound"))
     end
-
-    offsetA::UInt64 = mtx.rows[row].offsetA
-    offsetB::UInt64 = mtx.rows[row].offsetB
-    offsetC::UInt64 = mtx.rows[row].offsetC
-    leftOffset::UInt64 = offsetB == 0 ? offsetA : offsetB
-    rightOffset::UInt64 = (offsetC == 0 ? offsetA : offsetC) +
-                           mtx.subMatrixLength - 1
     
+    leftOffset::UInt64 = mtx.rows[row].firstIndex
+    rightOffset::UInt64 = leftOffset + 3 * mtx.subMatrixLength - 1
+
     if leftOffset <= column && column <= rightOffset
       mtx.rows[row].values[column - leftOffset + 1] = value
     else
@@ -130,12 +102,8 @@ module blocksys
       throw(BoundsError(row, "Index of out bound"))
     end
 
-    offsetA::UInt64 = mtx.rows[row].offsetA
-    offsetB::UInt64 = mtx.rows[row].offsetB
-    offsetC::UInt64 = mtx.rows[row].offsetC
-    leftOffset::UInt64 = offsetB == 0 ? offsetA : offsetB
-    rightOffset::UInt64 = (offsetC == 0 ? offsetA : offsetC) +
-                           mtx.subMatrixLength - 1
+    leftOffset::UInt64 = mtx.rows[row].firstIndex
+    rightOffset::UInt64 = leftOffset + 3 * mtx.subMatrixLength - 1
     
     if leftOffset <= column && column <= rightOffset
       return mtx.rows[row].values[column - leftOffset + 1]
@@ -145,16 +113,12 @@ module blocksys
   end
 
   @inline function setCellNoCheck!(mtx::SparseMatrix, row::UInt64, column::UInt64, value::Float64)
-    offsetA::UInt64 = mtx.rows[row].offsetA
-    offsetB::UInt64 = mtx.rows[row].offsetB
-    leftOffset::UInt64 = offsetB == 0 ? offsetA : offsetB
-    return @inbounds (mtx.rows[row].values[column - leftOffset + 1] = value)
+    leftOffset::UInt64 = mtx.rows[row].firstIndex
+    @inbounds (mtx.rows[row].values[column - leftOffset + 1] = value)
   end
 
   @inline function getCellNoCheck(mtx::SparseMatrix, row::UInt64, column::UInt64)::Float64
-    offsetA::UInt64 = mtx.rows[row].offsetA
-    offsetB::UInt64 = mtx.rows[row].offsetB
-    leftOffset::UInt64 = offsetB == 0 ? offsetA : offsetB
+    leftOffset::UInt64 = mtx.rows[row].firstIndex
     return @inbounds (mtx.rows[row].values[column - leftOffset + 1])
   end
 
@@ -166,30 +130,22 @@ module blocksys
     #iterate over diagonal
     for rowIndex in 1:(mtx.size - 1)
       elem = getCellNoCheck(mtx, rowIndex, rowIndex)
-      #printMatrix(mtx)
-      #println("-------------------a-----------------------")
       @boundscheck if iszero(elem)
-        #printMatrix(mtx)
         throw(DomainError("diagonal has 0 elem"))
       end
 
       blockEnd = min(rowIndex + mtx.subMatrixLength, mtx.size)
       #for every row within current block + 1 row
       for lowerRowIndex in (rowIndex + 1):(blockEnd)
-        #println((lowerRowIndex, rowIndex))
         temp = getCellNoCheck(mtx, lowerRowIndex, rowIndex)
         multiplier = temp / elem
         setCellNoCheck!(mtx, lowerRowIndex, rowIndex, 0.0)
 
-        lastElem = mtx.rows[rowIndex].offsetC == 0 ?
-          mtx.rows[rowIndex].offsetA : mtx.rows[rowIndex].offsetC
-        lastElem += mtx.subMatrixLength - 1
+        lastElem = mtx.rows[rowIndex].lastIndex
         
         #for every element in that row
         for index in (rowIndex + 1):lastElem
-          #println("currVal, ", (lowerRowIndex, index))
           currVal = getCellNoCheck(mtx, lowerRowIndex, index)
-          #println("upperVal, ", (rowIndex, index))
           upperVal = getCellNoCheck(mtx, rowIndex, index)
           setCellNoCheck!(mtx, lowerRowIndex, index, currVal - multiplier * upperVal)
         end
