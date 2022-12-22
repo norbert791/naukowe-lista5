@@ -1,7 +1,7 @@
 #author: Norbert Jaśniewicz
 module blocksys
 
-  export SparseMatrix, printMatrix, setCell!, getCell, gaussElimination!, gausseliminationMajor!, readMatrix, readVector
+  export SparseMatrix, printMatrix, setCell!, getCell, gaussElimination!, gaussEliminationMajor!, gaussEliminationMajorPriv!, readMatrix, readVector
 
   mutable struct MatrixRow
     #actual first index
@@ -60,7 +60,11 @@ module blocksys
   end
 
   function printMatrix(mtx::SparseMatrix)
-
+#=
+    for row in mtx.rows
+      println(row)
+    end
+=#
     for row in mtx.rows
       prefix = "* " ^ (row.firstIndex == 0 ? 0 : row.firstIndex - 1)
       length = (row.lastIndex - row.firstIndex)
@@ -171,7 +175,7 @@ module blocksys
     @boundscheck if mtx.size != length(bVector)
       throw(DomainError("bVector and mtx have different length"))
     end
-    rowPermutation::Vector{UInt64} = map(identity, 1:mtx.length)
+    rowPermutation::Vector{UInt64} = map(identity, 1:mtx.size)
     #iterate over diagonal
     for rowIndex in 1:(mtx.size - 1)
       
@@ -179,18 +183,26 @@ module blocksys
       blockEnd = min(rowIndex + mtx.subMatrixLength, mtx.size)
       majorRowIndex::UInt64 = rowIndex
 
+      #=
+      println("----------------------")
+      printMatrix(mtx)
+      println(rowPermutation)
+      println("----------------------")=#
+      
       for i in (rowIndex + 1):blockEnd
-        firstElem = getCell(mtx, i, rowPermutation[rowIndex])
+        firstElem = getCell(mtx, rowPermutation[i], rowIndex)
         if abs(firstElem) > abs(mtx.rows[rowPermutation[majorRowIndex]].values[rowIndex])
           majorRowIndex = i
         end
       end
 
-      
-      majorRowView = mtx.rows[rowPermutation[majorRowIndex]]
-      elem = getCellNoCheck(mtx, rowPermutation[majorRowIndex], rowIndex)
       #update permutation vector
-      rowPermutation[rowIndex], rowPermutation[rowPermutation[majorRowIndex]] = majorRowIndex, rowIndex
+      rowPermutation[rowIndex], rowPermutation[majorRowIndex] = rowPermutation[majorRowIndex], rowPermutation[rowIndex]
+      #Now majorRowIndex is the row number in actual representation
+      majorRowIndex = rowPermutation[rowIndex]
+      majorRowView = mtx.rows[majorRowIndex]
+
+      elem = getCellNoCheck(mtx, majorRowIndex, rowIndex)
 
       @boundscheck if iszero(elem)
         throw(DomainError("0 sub-column detected"))
@@ -198,28 +210,45 @@ module blocksys
 
       #for every row within current block + 1 row
       for nonMajorRowIndex in rowIndex:blockEnd
-        if nonMajorRowIndex == majorRowIndex
+        actualNonMajor = rowPermutation[nonMajorRowIndex]
+        if actualNonMajor == majorRowIndex
           continue
         end
         #align non major row to major row
-        if (majorRowIndex == blockEnd)
-          mtx.rows[nonMajorRowIndex].firstIndex = majorRowView.firstIndex
-          mtx.rows[nonMajorRowIndex].lastIndex = majorRowView.lastIndex
+        #=
+        println("-----------------------")
+        println("before")
+        println(rowIndex)
+        println(mtx.rows[majorRowIndex])
+        println(mtx.rows[actualNonMajor])
+        println("-----------------------")=#
+        shift = mtx.rows[majorRowIndex].firstIndex - mtx.rows[actualNonMajor].firstIndex
+        if (shift > 0)
+          shiftLeft!(mtx.rows[actualNonMajor], shift)
+          mtx.rows[actualNonMajor].firstIndex = mtx.rows[majorRowIndex].firstIndex
+          mtx.rows[actualNonMajor].lastIndex = min(mtx.size, mtx.rows[actualNonMajor].lastIndex + shift)
         end
-
-        temp = getCellNoCheck(mtx, nonMajorRowIndex, rowIndex)
+        #perform multiplication
+        temp = getCellNoCheck(mtx, actualNonMajor, rowIndex)
         multiplier = temp / elem
-        setCellNoCheck!(mtx, nonMajorRowIndex, rowIndex, 0.0)
+        setCellNoCheck!(mtx, actualNonMajor, rowIndex, 0.0)
 
         lastElem = majorRowView.lastIndex
         
         #for every element in that row
         for index in (rowIndex + 1):lastElem
-          currVal = getCellNoCheck(mtx, nonMajorRowIndex, index)
+          currVal = getCellNoCheck(mtx, actualNonMajor, index)
           upperVal = getCellNoCheck(mtx, majorRowIndex, index)
-          setCellNoCheck!(mtx, nonMajorRowIndex, index, currVal - multiplier * upperVal)
+          setCellNoCheck!(mtx, actualNonMajor, index, currVal - multiplier * upperVal)
         end
-        @inbounds bVector[nonMajorRowIndex] -= bVector[rowIndex] * multiplier
+        #println("-----------------------")
+        #println("after")
+        #println(rowIndex)
+        #println(mtx.rows[majorRowIndex])
+        #println(mtx.rows[actualNonMajor])
+        #println("-----------------------")
+
+        @inbounds bVector[actualNonMajor] -= bVector[majorRowIndex] * multiplier
       end
     end
 
@@ -230,20 +259,26 @@ module blocksys
     swapVector = gaussEliminationMajorPriv!(mtx, bVector)
     for i::UInt64 in length(bVector):-1:1
       actualIndex = swapVector[i]
-      for j::UInt64 in (i+1):(min(mtx.size, i + 2 * mtx.subMatrixLength - 1))
-        bVector[actualIndex] -= bVector[j] * getCellNoCheck(mtx, actualIndex, j)
+      for j::UInt64 in (i+1):(min(mtx.size, i + 3 * mtx.subMatrixLength - 1))
+        bVector[actualIndex] -= bVector[swapVector[j]] * getCellNoCheck(mtx, actualIndex, j)
+        #println("getCellNoCheck(mtx, actualIndex, j)", getCellNoCheck(mtx, actualIndex, j))
       end
+      #println("getCellNoCheck(mtx, actualIndex, i)", getCellNoCheck(mtx, actualIndex, i))
       bVector[actualIndex] /= getCellNoCheck(mtx, actualIndex, i)
     end
 
-    return bVector
+    result = [bVector[swapVector[i]] for i in 1:(mtx.size)]
+    
+    return result
   end
 
   function shiftLeft!(row::MatrixRow, shiftLength::UInt64)
-    row.firstIndex += shiftLength
-    
     for i in 1:(length(row.values) - shiftLength)
       row.values[i] = row.values[i + shiftLength]
+    end
+    
+    for i in (length(row.values) - shiftLength + 1):(length(row.values))
+      row.values[i] = 0.0
     end
   end
 

@@ -14,12 +14,17 @@ function main()
   t = readMatrix("testMatrix.txt")
   b = readVector("testVector.txt")
   printMatrix(t)
-  #println(b)
+  println(b)
   gaussElimination!(t, b)
   println("---------------------")
   printMatrix(t)
   println("---------------------")
   println(b) #expected resutl ~[-0.11664806432945962, 0.45355931057479104, -0.10887220790385349, 0.13142512919740418, -0.026441062380215718, 0.054427259042966754]
+  t = readMatrix("testMatrix.txt")
+  b = readVector("testVector.txt")
+  w = gaussEliminationMajor!(t, b)
+  printMatrix(t)
+  println(w)
 end
 
 main()
