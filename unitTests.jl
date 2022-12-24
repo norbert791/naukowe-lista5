@@ -1,3 +1,4 @@
+#author Norbert Jaśniewicz
 include("blocksys.jl")
 using Test
 using .blocksys

@@ -161,6 +161,7 @@ module blocksys
 
   function gaussElimination!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
     gaussEliminationPriv!(mtx::SparseMatrix, bVector::Vector{Float64})
+    printMatrix(mtx)
     for i::UInt64 in length(bVector):-1:1
       for j::UInt64 in (i+1):(min(mtx.size, i + 2 * mtx.subMatrixLength - 1))
         bVector[i] -= bVector[j] * getCellNoCheck(mtx, i, j)
@@ -222,11 +223,24 @@ module blocksys
         println(mtx.rows[majorRowIndex])
         println(mtx.rows[actualNonMajor])
         println("-----------------------")=#
-        shift = mtx.rows[majorRowIndex].firstIndex - mtx.rows[actualNonMajor].firstIndex
-        if (shift > 0)
-          shiftLeft!(mtx.rows[actualNonMajor], shift)
-          mtx.rows[actualNonMajor].firstIndex = mtx.rows[majorRowIndex].firstIndex
-          mtx.rows[actualNonMajor].lastIndex = min(mtx.size, mtx.rows[actualNonMajor].lastIndex + shift)
+
+        
+        shift::UInt64 = 0
+        smallerIndexRow::MatrixRow = mtx.rows[actualNonMajor]
+        largerIndexRow::MatrixRow = mtx.rows[majorRowIndex]
+
+        if largerIndexRow.firstIndex < smallerIndexRow.firstIndex
+          smallerIndexRow, largerIndexRow = largerIndexRow, smallerIndexRow
+        end
+        
+        shift = largerIndexRow.firstIndex - smallerIndexRow.firstIndex
+
+        if shift > 0
+          #println(largerIndexRow)
+          #println(smallerIndexRow)
+          shiftLeft!(smallerIndexRow, shift)
+          smallerIndexRow.firstIndex = largerIndexRow.firstIndex
+          smallerIndexRow.lastIndex = min(mtx.size, largerIndexRow.lastIndex + shift)
         end
         #perform multiplication
         temp = getCellNoCheck(mtx, actualNonMajor, rowIndex)
@@ -257,6 +271,8 @@ module blocksys
 
   function gaussEliminationMajor!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
     swapVector = gaussEliminationMajorPriv!(mtx, bVector)
+    printMatrix(mtx)
+    println(swapVector)
     for i::UInt64 in length(bVector):-1:1
       actualIndex = swapVector[i]
       for j::UInt64 in (i+1):(min(mtx.size, i + 3 * mtx.subMatrixLength - 1))

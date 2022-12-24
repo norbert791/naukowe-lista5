@@ -1,7 +1,7 @@
 include("blocksys.jl")
 using .blocksys
 
-function main() 
+function test1() 
   
   t = SparseMatrix(UInt64(12), UInt64(3))
   #=
@@ -25,6 +25,22 @@ function main()
   w = gaussEliminationMajor!(t, b)
   printMatrix(t)
   println(w)
+end
+
+function test2()
+ t = readMatrix("examples/dane16/A.txt")
+ b = readVector("examples/dane16/b.txt")
+ #printMatrix(t)
+ gaussElimination!(t, b)
+ println(b)
+ t = readMatrix("examples/dane16/A.txt")
+ b = readVector("examples/dane16/b.txt")
+ w = gaussEliminationMajor!(t, b)
+ println(w)
+end
+
+function main()
+  test2()
 end
 
 main()
