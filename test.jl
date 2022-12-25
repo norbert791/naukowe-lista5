@@ -23,15 +23,15 @@ function test2()
  b = readVector("examples/dane500_000/b.txt")
  #printMatrix(t)
  gaussElimination!(t, b)
- println(b)
- t = readMatrix("examples/dane500_000/A.txt")
- b = readVector("examples/dane500_000/b.txt")
- w = gaussEliminationMajor!(t, b)
- println(w)
+ #println(b)
+ #t = readMatrix("examples/dane500_000/A.txt")
+ #b = readVector("examples/dane500_000/b.txt")
+ #w = gaussEliminationMajor!(t, b)
+ #println(w)
 end
 
 function main()
-  test2()
+  @time test2()
 end
 
 main()
