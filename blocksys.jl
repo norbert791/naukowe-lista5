@@ -1,129 +1,17 @@
 #author: Norbert Jaśniewicz
 module blocksys
+  import SparseArrays
 
-  export SparseMatrix, printMatrix, setCell!, getCell, gaussElimination!, gaussEliminationMajor!, gaussEliminationMajorPriv!, readMatrix, readVector
-
-  mutable struct MatrixRow
-    #actual first index
-    firstIndex::UInt64
-    #actual last index
-    lastIndex::UInt64
-    #values
-    values::Vector{Float64}
-
-    MatrixRow(firstIndex, lastIndex, ALength) = new(firstIndex, lastIndex, zeros(4 * ALength))
-  end
+  export SparseMatrix, printMatrix, gaussElimination!, gaussEliminationMajor!, gaussEliminationMajorPriv!, readMatrix, readVector
 
   mutable struct SparseMatrix
     size::UInt64
     subMatrixLength::UInt64
-    rows::Vector{MatrixRow}
-
-    function SparseMatrix(size::UInt64, subMatrixLength::UInt64)
-      if (size % subMatrixLength != 0)
-        throw(DomainError((size, subMatrixLength), "size mod subMatrixLength must be equal 0"))
-      end
-      if (size == subMatrixLength)
-        throw(DomainError((size, subMatrixLength), "size == subMatrixLength"))
-      end
-      
-      rows::Vector{MatrixRow} = []
-      
-      #Insert A_0C_0 rows
-      for i in 1:subMatrixLength
-        push!(rows, MatrixRow(1, subMatrixLength + i, subMatrixLength))
-      end
-
-      #Number of remaining blocks
-      numBlocks = div(size, subMatrixLength) - 1
-
-      for i in 1:(numBlocks-1) #first block already inserted, last one ill be inserted manually
-        offsetA = i * subMatrixLength + 1
-        push!(rows, MatrixRow(offsetA - subMatrixLength, offsetA + subMatrixLength, subMatrixLength))
-        
-        for j in 1:(subMatrixLength - 1)
-          push!(rows, MatrixRow(offsetA - 1, offsetA + subMatrixLength + j, subMatrixLength))
-        end
-      end
-
-      #BA block
-      offsetA = numBlocks * subMatrixLength + 1
-      push!(rows, MatrixRow(offsetA - subMatrixLength, offsetA + subMatrixLength - 1, subMatrixLength))
-
-      for _ in 1:(subMatrixLength - 1)
-        push!(rows, MatrixRow(offsetA - 1, offsetA + subMatrixLength - 1, subMatrixLength))
-      end
-
-      return new(size, subMatrixLength, rows)
-    end
-    
+    vals::SparseArrays.SparseMatrixCSC{Float64, UInt64}
   end
 
   function printMatrix(mtx::SparseMatrix)
-#=
-    for row in mtx.rows
-      println(row)
-    end
-=#
-    for row in mtx.rows
-      prefix = "* " ^ (row.firstIndex == 0 ? 0 : row.firstIndex - 1)
-      length = (row.lastIndex - row.firstIndex)
-      rowView = row.values[1:(length + 1)]
-      vals = map(x -> string(x), rowView)
-      vals = join(vals, " ")
-      suffix = "* " ^ (mtx.size - row.lastIndex)
-      result = prefix * vals * " " * suffix * "\n"
-      println(result)
-    end
-  end
-
-  function setCell!(mtx::SparseMatrix, row::UInt64, column::UInt64, value::Float64)
-    @boundscheck if row > mtx.size || row == 0
-      throw(BoundsError(row, "Index of out bound"))
-    end
-
-    @boundscheck if column == 0 || column > mtx.size
-      throw(BoundsError(row, "Index of out bound"))
-    end
-    
-    leftOffset::UInt64 = mtx.rows[row].firstIndex
-    rightOffset::UInt64 = leftOffset + 3 * mtx.subMatrixLength - 1
-
-    if leftOffset <= column && column <= rightOffset
-      mtx.rows[row].values[column - leftOffset + 1] = value
-    else
-      throw(BoundsError(row, "Attempt to assign value to 0-field"))
-    end
-  end
-
-  function getCell(mtx::SparseMatrix, row::UInt64, column::UInt64)::Float64
-    @boundscheck if row > mtx.size || row == 0
-      throw(BoundsError(row, "Index of out bound"))
-    end
-    
-    
-    @boundscheck if column == 0 || column > mtx.size
-      throw(BoundsError(row, "Index of out bound"))
-    end
-
-    leftOffset::UInt64 = mtx.rows[row].firstIndex
-    rightOffset::UInt64 = leftOffset + 4 * mtx.subMatrixLength - 1
-    
-    if leftOffset <= column && column <= rightOffset
-      return mtx.rows[row].values[column - leftOffset + 1]
-    else
-      return 0.0
-    end
-  end
-
-  @inline function setCellNoCheck!(mtx::SparseMatrix, row::UInt64, column::UInt64, value::Float64)
-    leftOffset::UInt64 = mtx.rows[row].firstIndex
-    @inbounds (mtx.rows[row].values[column - leftOffset + 1] = value)
-  end
-
-  @inline function getCellNoCheck(mtx::SparseMatrix, row::UInt64, column::UInt64)::Float64
-    leftOffset::UInt64 = mtx.rows[row].firstIndex
-    return @inbounds (mtx.rows[row].values[column - leftOffset + 1])
+    @show mtx.vals
   end
 
   function gaussEliminationPriv!(mtx::SparseMatrix, bVector::Vector{Float64})
@@ -132,8 +20,8 @@ module blocksys
     end
 
     #iterate over diagonal
-    for rowIndex in 1:(mtx.size - 1)
-      elem = getCellNoCheck(mtx, rowIndex, rowIndex)
+    for rowIndex::UInt64 in 1:(mtx.size - 1)
+      elem = mtx.vals[rowIndex,rowIndex]
       @boundscheck if iszero(elem)
         throw(DomainError("diagonal has 0 elem"))
       end
@@ -141,17 +29,17 @@ module blocksys
       blockEnd = min(rowIndex + mtx.subMatrixLength, mtx.size)
       #for every row within current block + 1 row
       for lowerRowIndex in (rowIndex + 1):(blockEnd)
-        temp = getCellNoCheck(mtx, lowerRowIndex, rowIndex)
+        temp = mtx.vals[lowerRowIndex,rowIndex]
         multiplier = temp / elem
-        setCellNoCheck!(mtx, lowerRowIndex, rowIndex, 0.0)
+        mtx.vals[lowerRowIndex, rowIndex] = 0.0
 
-        lastElem = mtx.rows[rowIndex].lastIndex
+        lastIndex = min(rowIndex + mtx.subMatrixLength, mtx.size)
         
         #for every element in that row
-        for index in (rowIndex + 1):lastElem
-          currVal = getCellNoCheck(mtx, lowerRowIndex, index)
-          upperVal = getCellNoCheck(mtx, rowIndex, index)
-          setCellNoCheck!(mtx, lowerRowIndex, index, currVal - multiplier * upperVal)
+        for index in (rowIndex + 1):lastIndex
+          currVal = mtx.vals[lowerRowIndex, index]
+          upperVal = mtx.vals[rowIndex, index]
+          mtx.vals[lowerRowIndex, index] = currVal - multiplier * upperVal
         end
         @inbounds bVector[lowerRowIndex] -= bVector[rowIndex] * multiplier
       end
@@ -161,12 +49,11 @@ module blocksys
 
   function gaussElimination!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
     gaussEliminationPriv!(mtx::SparseMatrix, bVector::Vector{Float64})
-    printMatrix(mtx)
     for i::UInt64 in length(bVector):-1:1
       for j::UInt64 in (i+1):(min(mtx.size, i + 2 * mtx.subMatrixLength - 1))
-        bVector[i] -= bVector[j] * getCellNoCheck(mtx, i, j)
+        bVector[i] -= bVector[j] * mtx.vals[i, j]
       end
-      bVector[i] /= getCellNoCheck(mtx, i, i)
+      bVector[i] /= mtx.vals[i, i]
     end
 
     return bVector
@@ -183,16 +70,10 @@ module blocksys
       #find major element row
       blockEnd = min(rowIndex + mtx.subMatrixLength, mtx.size)
       majorRowIndex::UInt64 = rowIndex
-
-      #=
-      println("----------------------")
-      printMatrix(mtx)
-      println(rowPermutation)
-      println("----------------------")=#
       
       for i in (rowIndex + 1):blockEnd
-        firstElem = getCell(mtx, rowPermutation[i], rowIndex)
-        if abs(firstElem) > abs(mtx.rows[rowPermutation[majorRowIndex]].values[rowIndex])
+        firstElem = mtx.vals[rowPermutation[i], rowIndex]
+        if abs(firstElem) > abs(mtx.vals[rowPermutation[majorRowIndex], rowIndex])
           majorRowIndex = i
         end
       end
@@ -201,9 +82,8 @@ module blocksys
       rowPermutation[rowIndex], rowPermutation[majorRowIndex] = rowPermutation[majorRowIndex], rowPermutation[rowIndex]
       #Now majorRowIndex is the row number in actual representation
       majorRowIndex = rowPermutation[rowIndex]
-      majorRowView = mtx.rows[majorRowIndex]
 
-      elem = getCellNoCheck(mtx, majorRowIndex, rowIndex)
+      elem = mtx.vals[majorRowIndex, rowIndex]
 
       @boundscheck if iszero(elem)
         throw(DomainError("0 sub-column detected"))
@@ -215,45 +95,19 @@ module blocksys
         if actualNonMajor == majorRowIndex
           continue
         end
-        #align non major row to major row
-        #=
-        println("-----------------------")
-        println("before")
-        println(rowIndex)
-        println(mtx.rows[majorRowIndex])
-        println(mtx.rows[actualNonMajor])
-        println("-----------------------")=#
-
-        
-        shift::UInt64 = 0
-        smallerIndexRow::MatrixRow = mtx.rows[actualNonMajor]
-        largerIndexRow::MatrixRow = mtx.rows[majorRowIndex]
-
-        if largerIndexRow.firstIndex < smallerIndexRow.firstIndex
-          smallerIndexRow, largerIndexRow = largerIndexRow, smallerIndexRow
-        end
-        
-        shift = largerIndexRow.firstIndex - smallerIndexRow.firstIndex
-
-        if shift > 0
-          #println(largerIndexRow)
-          #println(smallerIndexRow)
-          shiftLeft!(smallerIndexRow, shift)
-          smallerIndexRow.firstIndex = largerIndexRow.firstIndex
-          smallerIndexRow.lastIndex = min(mtx.size, largerIndexRow.lastIndex + shift)
-        end
+                
         #perform multiplication
-        temp = getCellNoCheck(mtx, actualNonMajor, rowIndex)
+        temp = mtx.vals[actualNonMajor, rowIndex]
         multiplier = temp / elem
-        setCellNoCheck!(mtx, actualNonMajor, rowIndex, 0.0)
+        mtx.vals[actualNonMajor, rowIndex] =  0.0
 
-        lastElem = majorRowView.lastIndex
+        lastElem = min(rowIndex + mtx.subMatrixLength * 3 - 1, mtx.size)
         
         #for every element in that row
         for index in (rowIndex + 1):lastElem
-          currVal = getCellNoCheck(mtx, actualNonMajor, index)
-          upperVal = getCellNoCheck(mtx, majorRowIndex, index)
-          setCellNoCheck!(mtx, actualNonMajor, index, currVal - multiplier * upperVal)
+          currVal = mtx.vals[actualNonMajor, index]
+          upperVal = mtx.vals[majorRowIndex, index]
+          mtx.vals[ actualNonMajor, index] = currVal - multiplier * upperVal
         end
         #println("-----------------------")
         #println("after")
@@ -271,31 +125,21 @@ module blocksys
 
   function gaussEliminationMajor!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
     swapVector = gaussEliminationMajorPriv!(mtx, bVector)
-    printMatrix(mtx)
-    println(swapVector)
+    #printMatrix(mtx)
+    #println(swapVector)
     for i::UInt64 in length(bVector):-1:1
       actualIndex = swapVector[i]
       for j::UInt64 in (i+1):(min(mtx.size, i + 3 * mtx.subMatrixLength - 1))
-        bVector[actualIndex] -= bVector[swapVector[j]] * getCellNoCheck(mtx, actualIndex, j)
+        bVector[actualIndex] -= bVector[swapVector[j]] * mtx.vals[actualIndex, j]
         #println("getCellNoCheck(mtx, actualIndex, j)", getCellNoCheck(mtx, actualIndex, j))
       end
       #println("getCellNoCheck(mtx, actualIndex, i)", getCellNoCheck(mtx, actualIndex, i))
-      bVector[actualIndex] /= getCellNoCheck(mtx, actualIndex, i)
+      bVector[actualIndex] /= mtx.vals[actualIndex, i]
     end
 
     result = [bVector[swapVector[i]] for i in 1:(mtx.size)]
     
     return result
-  end
-
-  function shiftLeft!(row::MatrixRow, shiftLength::UInt64)
-    for i in 1:(length(row.values) - shiftLength)
-      row.values[i] = row.values[i + shiftLength]
-    end
-    
-    for i in (length(row.values) - shiftLength + 1):(length(row.values))
-      row.values[i] = 0.0
-    end
   end
 
   function readMatrix(filename::String)::SparseMatrix
@@ -305,14 +149,16 @@ module blocksys
       t = split(t)
       size::UInt64 = parse(UInt64, t[1])      
       blockSize::UInt64 = parse(UInt64, t[2])      
-      result = SparseMatrix(size, blockSize)
-      
+      rows, cols, vals = zeros(UInt64, length(fileStr)), zeros(UInt64, length(fileStr)), zeros(Float64, length(fileStr))
+
+      index = 1
       for line in fileStr
         t = split(line)
-        row, col, val = parse(UInt64, t[1]), parse(UInt64, t[2]), parse(Float64, t[3])
-        setCell!(result, row, col, val)
+        rows[index], cols[index], vals[index] = parse(UInt64, t[1]), parse(UInt64, t[2]), parse(Float64, t[3])
+        index += 1
       end
-      return result
+
+      return SparseMatrix(size, blockSize, SparseArrays.sparse(rows, cols, vals))
     end
   end
 
