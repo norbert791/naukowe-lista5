@@ -2,7 +2,8 @@
 module blocksys
   import SparseArrays
 
-  export SparseMatrix, printMatrix, gaussElimination!, gaussEliminationMajor!, gaussEliminationMajorPriv!, readMatrix, readVector
+  export SparseMatrix, printMatrix, gaussElimination!, gaussEliminationMajor!,
+         gaussEliminationMajorPriv!, readMatrix, readVector, luDecomposition!, computeFromLU!
 
   mutable struct SparseMatrix
     size::UInt64
@@ -134,10 +135,6 @@ module blocksys
   end
 
   function luDecomposition!(mtx::SparseMatrix)
-    @boundscheck if mtx.size != length(bVector)
-      throw(DomainError("bVector and mtx have different length"))
-    end
-
     #iterate over diagonal
     for rowIndex::UInt64 in 1:(mtx.size - 1)
       elem = mtx.vals[rowIndex,rowIndex]
@@ -220,10 +217,24 @@ module blocksys
     return rowPermutation
   end
 
-  #=function computeFromLU!(luMtx::SparseMatrix, bVector::Vector{Float64})
+  function computeFromLU!(luMtx::SparseMatrix, bVector::Vector{Float64})
     for rowIndex::UInt64 in length(bVector):-1:1
-      for 
-  end=#
+      columnBegin = rowIndex > luMtx.subMatrixLength ? rowIndex - luMtx.subMatrixLength : 1
+      for columnIndex::UInt64 in (rowIndex - 1):-1:columnBegin
+        bVector[rowIndex] -= luMtx.vals[rowIndex, columnBegin] * bVector[columnIndex]
+      end
+    end
+
+    for i::UInt64 in (luMtx.size):-1:1
+      for j::UInt64 in (i+1):(min(luMtx.size, i + 2 * luMtx.subMatrixLength - 1))
+        @inbounds bVector[i] -= bVector[j] * luMtx.vals[i, j]
+      end
+      @inbounds bVector[i] /= luMtx.vals[i, i]
+    end
+
+    return bVector
+
+  end
 
   function readMatrix(filename::String)::SparseMatrix
     open(filename, "r") do file
