@@ -218,7 +218,7 @@ module blocksys
         #perform multiplication
         temp = mtx.vals[actualNonMajor, rowIndex]
         multiplier = temp / elem
-        mtx.vals[actualNonMajor, rowIndex] = temp
+        mtx.vals[actualNonMajor, rowIndex] = multiplier
 
         lastElem = min(rowIndex + mtx.subMatrixLength * 3 - 1, mtx.size)
         
@@ -237,8 +237,8 @@ module blocksys
   function  computeFromLUMajor!(luMtx::SparseMatrix, swapVector::Vector{UInt64}, bVector::Vector{Float64})::Vector{Float64}
 
     for rowIndex::UInt64 in 2:(luMtx.size)
-      # safe version of: rowIndex - luMtx.subMatrixLength > 0 
-      columnBegin = rowIndex > luMtx.subMatrixLength ? rowIndex - luMtx.subMatrixLength : 1
+      # safe version of: rowIndex - 3 * luMtx.subMatrixLength > 0 
+      columnBegin = rowIndex > 3 * luMtx.subMatrixLength ? rowIndex - luMtx.subMatrixLength : 1
       
       for columnIndex::UInt64 in (rowIndex - 1):-1:columnBegin
         bVector[swapVector[rowIndex]] -= luMtx.vals[swapVector[rowIndex], columnIndex] * bVector[swapVector[columnIndex]]
