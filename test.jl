@@ -30,8 +30,18 @@ function test2()
  #println(w)
 end
 
+function test3()
+  t = readMatrix("testMatrix.txt")
+  b = readVector("testVector.txt")
+  luDecomposition!(t)
+  computeFromLU!(t, b)
+  @show b
+  #@show t.vals
+end
+
 function main()
-  @time test2()
+  #@time test2()
+  test3()
 end
 
 main()

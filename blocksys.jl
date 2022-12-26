@@ -3,7 +3,8 @@ module blocksys
   import SparseArrays
 
   export SparseMatrix, printMatrix, gaussElimination!, gaussEliminationMajor!,
-         gaussEliminationMajorPriv!, readMatrix, readVector, luDecomposition!, computeFromLU!
+         readMatrix, readVector, luDecomposition!, computeFromLU!, luDecompositionMajor!,
+         computeFromLUMajor!
 
   mutable struct SparseMatrix
     size::UInt64
@@ -161,10 +162,26 @@ module blocksys
     end
   end
 
-  function luDecompositionMajor!(mtx::SparseMatrix)::Vector{UInt64}
-    @boundscheck if mtx.size != length(bVector)
-      throw(DomainError("bVector and mtx have different length"))
+  function computeFromLU!(luMtx::SparseMatrix, bVector::Vector{Float64})
+    for rowIndex::UInt64 in 2:(luMtx.size)
+      # safe version of: rowIndex - luMtx.subMatrixLength > 0 
+      columnBegin = rowIndex > luMtx.subMatrixLength ? rowIndex - luMtx.subMatrixLength : 1
+      for columnIndex::UInt64 in (rowIndex - 1):-1:columnBegin
+        bVector[rowIndex] -= luMtx.vals[rowIndex, columnIndex] * bVector[columnIndex]
+      end
     end
+
+    for i::UInt64 in (luMtx.size):-1:1
+      for j::UInt64 in (i+1):(min(luMtx.size, i + 2 * luMtx.subMatrixLength - 1))
+        @inbounds bVector[i] -= bVector[j] * luMtx.vals[i, j]
+      end
+      @inbounds bVector[i] /= luMtx.vals[i, i]
+    end
+
+    return bVector
+  end
+
+  function luDecompositionMajor!(mtx::SparseMatrix)::Vector{UInt64}
     rowPermutation::Vector{UInt64} = map(identity, 1:mtx.size)
     #iterate over diagonal
     for rowIndex in 1:(mtx.size - 1)
@@ -217,23 +234,30 @@ module blocksys
     return rowPermutation
   end
 
-  function computeFromLU!(luMtx::SparseMatrix, bVector::Vector{Float64})
-    for rowIndex::UInt64 in length(bVector):-1:1
+  function  computeFromLUMajor!(luMtx::SparseMatrix, swapVector::Vector{UInt64}, bVector::Vector{Float64})::Vector{Float64}
+
+    for rowIndex::UInt64 in 2:(luMtx.size)
+      # safe version of: rowIndex - luMtx.subMatrixLength > 0 
       columnBegin = rowIndex > luMtx.subMatrixLength ? rowIndex - luMtx.subMatrixLength : 1
+      
       for columnIndex::UInt64 in (rowIndex - 1):-1:columnBegin
-        bVector[rowIndex] -= luMtx.vals[rowIndex, columnBegin] * bVector[columnIndex]
+        bVector[swapVector[rowIndex]] -= luMtx.vals[swapVector[rowIndex], columnIndex] * bVector[swapVector[columnIndex]]
       end
     end
 
     for i::UInt64 in (luMtx.size):-1:1
-      for j::UInt64 in (i+1):(min(luMtx.size, i + 2 * luMtx.subMatrixLength - 1))
-        @inbounds bVector[i] -= bVector[j] * luMtx.vals[i, j]
+      actualIndex = swapVector[i]
+
+      for j::UInt64 in (i+1):(min(luMtx.size, i + 3 * luMtx.subMatrixLength - 1))
+        bVector[actualIndex] -= bVector[swapVector[j]] * luMtx.vals[actualIndex, j]
       end
-      @inbounds bVector[i] /= luMtx.vals[i, i]
+      bVector[actualIndex] /= luMtx.vals[actualIndex, i]
     end
 
-    return bVector
-
+    result = [bVector[swapVector[i]] for i in 1:(luMtx.size)]
+    
+    return result
+    
   end
 
   function readMatrix(filename::String)::SparseMatrix
