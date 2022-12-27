@@ -6,3 +6,8 @@
 
 #Examples
 examples/*
+
+#temp files
+
+randomTestTempFile.txt
+plotsTemp.txt

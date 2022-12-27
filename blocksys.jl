@@ -162,7 +162,7 @@ module blocksys
     end
   end
 
-  function computeFromLU!(luMtx::SparseMatrix, bVector::Vector{Float64})
+  function computeFromLU!(luMtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
     for rowIndex::UInt64 in 2:(luMtx.size)
       # safe version of: rowIndex - luMtx.subMatrixLength > 0 
       columnBegin = rowIndex > luMtx.subMatrixLength ? rowIndex - luMtx.subMatrixLength : 1
