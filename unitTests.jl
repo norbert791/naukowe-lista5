@@ -22,10 +22,10 @@ function gaussEliminationTests()
 end
 
 
-function gaussEliminationMajorTests()
+function gaussEliminationPivotTests()
   t = readMatrix("testMatrix.txt")
   b = readVector("testVector.txt")
-  b = gaussEliminationMajor!(t, b)
+  b = gaussEliminationPivot!(t, b)
   #computed with https://calculator-online.net/gaussian-elimination-calculator/
   expected::Vector{Float64} = [-0.11664806432945962, 0.45355931057479104, -0.10887220790385349, 0.13142512919740418, -0.026441062380215718, 0.054427259042966754]
   success = true
@@ -59,11 +59,11 @@ function luDecompositionTest()
   @assert success "LU decomposition failed"
 end
 
-function luDecompositionMajorTest()
+function luDecompositionPivotTest()
   t = readMatrix("testMatrix.txt")
   b = readVector("testVector.txt")
-  swp = luDecompositionMajor!(t)
-  result = computeFromLUMajor!(t, swp, b)
+  swp = luDecompositionPivot!(t)
+  result = computeFromLUPivot!(t, swp, b)
     
   expected::Vector{Float64} = [-0.11664806432945962, 0.45355931057479104, -0.10887220790385349, 0.13142512919740418, -0.026441062380215718, 0.054427259042966754]
   success = true
@@ -80,9 +80,9 @@ end
 
 function main() 
   gaussEliminationTests()
-  gaussEliminationMajorTests()
+  gaussEliminationPivotTests()
   luDecompositionTest()
-  luDecompositionMajorTest() 
+  luDecompositionPivotTest() 
 
   println("All tests passed")
 end

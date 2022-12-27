@@ -2,9 +2,9 @@
 module blocksys
   import SparseArrays
 
-  export SparseMatrix, printMatrix, gaussElimination!, gaussEliminationMajor!,
-         readMatrix, readVector, luDecomposition!, computeFromLU!, luDecompositionMajor!,
-         computeFromLUMajor!
+  export SparseMatrix, printMatrix, gaussElimination!, gaussEliminationPivot!,
+         readMatrix, readVector, luDecomposition!, computeFromLU!, luDecompositionPivot!,
+         computeFromLUPivot!, writeVector
 
   mutable struct SparseMatrix
     size::UInt64
@@ -61,7 +61,7 @@ module blocksys
     return bVector
   end
 
-  function gaussEliminationMajorPriv!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{UInt64}
+  function gaussEliminationPivotPriv!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{UInt64}
     @boundscheck if mtx.size != length(bVector)
       throw(DomainError("bVector and mtx have different length"))
     end
@@ -119,8 +119,8 @@ module blocksys
     return rowPermutation
   end
 
-  function gaussEliminationMajor!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
-    swapVector = gaussEliminationMajorPriv!(mtx, bVector)
+  function gaussEliminationPivot!(mtx::SparseMatrix, bVector::Vector{Float64})::Vector{Float64}
+    swapVector = gaussEliminationPivotPriv!(mtx, bVector)
 
     for i::UInt64 in length(bVector):-1:1
       actualIndex = swapVector[i]
@@ -181,7 +181,7 @@ module blocksys
     return bVector
   end
 
-  function luDecompositionMajor!(mtx::SparseMatrix)::Vector{UInt64}
+  function luDecompositionPivot!(mtx::SparseMatrix)::Vector{UInt64}
     rowPermutation::Vector{UInt64} = map(identity, 1:mtx.size)
     #iterate over diagonal
     for rowIndex in 1:(mtx.size - 1)
@@ -234,7 +234,7 @@ module blocksys
     return rowPermutation
   end
 
-  function  computeFromLUMajor!(luMtx::SparseMatrix, swapVector::Vector{UInt64}, bVector::Vector{Float64})::Vector{Float64}
+  function computeFromLUPivot!(luMtx::SparseMatrix, swapVector::Vector{UInt64}, bVector::Vector{Float64})::Vector{Float64}
 
     for rowIndex::UInt64 in 2:(luMtx.size)
       # safe version of: rowIndex - 3 * luMtx.subMatrixLength > 0 
@@ -295,4 +295,14 @@ module blocksys
       return result
     end
   end
+
+  function writeVector(filename::String, xVector::Vector{Float64})
+    open(filename, "w") do file
+      write(file, "$(length(xVector))\n")
+      for num in xVector
+        write(file, "$num\n")
+      end
+    end
+  end
+
 end
