@@ -38,7 +38,8 @@ function generateStats(computationMethods::Dict{String, Function}, sizeRange)
       sumTime = 0.0
       allocAmount = 0
       
-      for _ in 1:testRuns
+      for i in 1:testRuns
+        println("n: $(n) fun: $(fun), run: $(i)")
         mtxCopy = deepcopy(mtx)
         bCopy = deepcopy(bVector)
         sumTime += @elapsed(fun(mtxCopy, bCopy))
@@ -61,8 +62,8 @@ end
 function main()
   funs = Dict("gauss" => gaussTest, "gauss_pivot" => gaussPivotTest,
               "lu" => luTest, "lu_pivot" => luPivotTest)
-  rng = 100:100:1000
-  res1, res2 = generateStats(funs, 10_000:10_000:100_000)
+  rng = 10_000:10_000:100_000
+  res1, res2 = generateStats(funs, rng)
   
   funNames = keys(funs)
 
