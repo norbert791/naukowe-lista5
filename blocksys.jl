@@ -238,7 +238,7 @@ module blocksys
 
     for rowIndex::UInt64 in 2:(luMtx.size)
       # safe version of: rowIndex - 3 * luMtx.subMatrixLength > 0 
-      columnBegin = rowIndex > 3 * luMtx.subMatrixLength ? rowIndex - luMtx.subMatrixLength : 1
+      columnBegin =  rowIndex > 3 * luMtx.subMatrixLength ? rowIndex - 3 * luMtx.subMatrixLength : 1
       
       for columnIndex::UInt64 in (rowIndex - 1):-1:columnBegin
         bVector[swapVector[rowIndex]] -= luMtx.vals[swapVector[rowIndex], columnIndex] * bVector[swapVector[columnIndex]]
