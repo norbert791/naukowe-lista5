@@ -1,3 +1,5 @@
+#author: Norbert Jaśniewicz
+
 include("blocksys.jl")
 include("blockmat.jl")
 
